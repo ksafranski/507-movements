@@ -117,11 +117,14 @@
       // Involute-ish spur gear. z teeth, module m, rotation ang.
       gear(cx, cy, z, m, ang, o = {}) {
         const rp = (m * z) / 2, ra = rp + m, rd = rp - 1.25 * m, p = TAU / z;
+        // o.teeth: optional list of tooth indices to keep (a "mutilated" gear).
+        const has = o.teeth ? (i) => o.teeth.includes(i) : () => true;
         const pts = [];
         for (let i = 0; i < z; i++) {
           const b = ang + i * p;
           for (const [r, f] of [[rd, -0.5], [rd, -0.3], [ra, -0.13], [ra, 0.13], [rd, 0.3]]) {
-            pts.push([cx + r * Math.cos(b + f * p), cy + r * Math.sin(b + f * p)]);
+            const rr = has(i) ? r : rd;
+            pts.push([cx + rr * Math.cos(b + f * p), cy + rr * Math.sin(b + f * p)]);
           }
         }
         d.poly(pts, { fill: o.fill || C.part, stroke: o.stroke || C.ink, w: 1.3 });

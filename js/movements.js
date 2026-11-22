@@ -14,6 +14,7 @@
     'osc-lin': { label: 'Swing → Straight line', from: 'Swing', to: 'Straight line' },
     'lin-lin': { label: 'Back & forth → Back & forth', from: 'Back & forth', to: 'Back & forth' },
     'lin-rot': { label: 'Back & forth → Rotation', from: 'Back & forth', to: 'Rotation' },
+    'osc-rot': { label: 'Swing → Rotation', from: 'Swing', to: 'Rotation' },
   };
   const FAMILY = {
     gears: 'Gears', linkages: 'Linkages', cams: 'Cams', belts: 'Belts, ropes & chains', screws: 'Screws & worms', indexing: 'Stops & indexing',
@@ -1113,6 +1114,265 @@
       d.circle(P.x, P.y, 5, { fill: d.C.output, stroke: null });
     },
     output: (t) => -CB.at(t).P.y,
+  });
+
+  // ───────────────────────────── Intermittent (mutilated) gear
+  const IG = (() => {
+    const m = 6, z1 = 24, z2 = 16, n = 4, p1 = TAU / z1, W = n * p1;
+    const D = { x: 140, y: 150 }, E = { x: 140 + (m * (z1 + z2)) / 2, y: 150 };
+    // Driver angle "seen" by the driven gear: advances only while teeth are in mesh.
+    const eff = (t) => { const u = t + (n - 0.5) * p1; return Math.floor(u / TAU) * W + Math.min(mod(u, TAU), W); };
+    const driven = (t) => PI + PI / z2 - (z1 / z2) * (eff(t) - (n - 0.5) * p1);
+    return { m, z1, z2, n, D, E, driven };
+  })();
+  add({
+    id: 'intermittent-gear', title: 'Intermittent gear', aka: ['Mutilated gear', 'Partial gear', 'Segment-tooth gear'],
+    motion: 'rot-int', family: 'indexing',
+    summary: 'A driver with only a few teeth turns its partner for part of each revolution, then leaves it standing still.',
+    how: [
+      'Most of the driver\'s rim has its teeth cut away. While the toothed segment passes, it meshes normally and turns the driven gear; the rest of the time the plain rim slides past and the driven gear rests.',
+      'Here 4 teeth move the 16-tooth gear a quarter turn per revolution — the same job as a Geneva drive, but with an abrupt start and stop. Real versions add a curved locking rim so the driven gear cannot drift while it waits.',
+    ],
+    key: 'Teeth on the driver ÷ teeth on the driven = fraction of a turn per step.',
+    uses: ['Counters and odometers', 'Packaging machines', 'Toy mechanisms', 'Film advance'],
+    related: ['geneva', 'ratchet', 'spur-gears'],
+    outLabel: 'Driven gear angle',
+    draw(d, t) {
+      const { m, z1, z2, n, D, E, driven } = IG;
+      d.gear(E.x, E.y, z2, m, driven(t), OUT(d));
+      d.gear(D.x, D.y, z1, m, t, { ...IN(d), teeth: Array.from({ length: n }, (_, i) => i) });
+      d.pin(D.x, D.y, 4); d.pin(E.x, E.y, 4);
+    },
+    output: (t) => -IG.driven(t),
+  });
+
+  // ───────────────────────────── Segment gear (sector and pinion)
+  const SG = { m: 6, zs: 32, zp: 10, S: { x: 112, y: 160 }, swing: (t) => 0.36 * sin(t) };
+  add({
+    id: 'segment-gear', title: 'Segment gear', aka: ['Sector gear', 'Quadrant and pinion', 'Toothed segment'],
+    motion: 'osc-rot', family: 'gears',
+    summary: 'A swinging toothed sector turns a small pinion through a much larger angle.',
+    how: [
+      'Only a slice of a large gear is needed when it never turns all the way round. As the sector swings back and forth, its teeth drive the pinion through the same arc length — and because the pinion is small, that is a big angle.',
+      'Here a 32-tooth sector swinging ±20° turns the 10-tooth pinion about ±66°, amplifying a short lever motion. Run it backwards and a spinning pinion gives a slow, strong swing.',
+    ],
+    key: 'Pinion angle = sector angle × sector teeth ÷ pinion teeth.',
+    uses: ['Dial gauges', 'Steering boxes', 'Old typewriters', 'Barrier gates', 'Gauge needles'],
+    related: ['rack-pinion', 'spur-gears', 'bell-crank'],
+    outLabel: 'Pinion angle',
+    draw(d, t) {
+      const { m, zs, zp, S, swing } = SG, s = swing(t), rp = (m * zs) / 2, p = TAU / zs;
+      const P = { x: S.x + (m * (zs + zp)) / 2, y: S.y };
+      d.gear(P.x, P.y, zp, m, PI + PI / zp - (zs / zp) * s, OUT(d));
+      const ra = rp + m, rd = rp - 1.25 * m, pts = [[S.x, S.y]];
+      for (let i = -4; i <= 4; i++) {
+        const b = s + i * p;
+        for (const [r, f] of [[rd, -0.5], [rd, -0.3], [ra, -0.13], [ra, 0.13], [rd, 0.3]]) {
+          if (i === -4 && f < 0.3) continue;
+          pts.push([S.x + r * cos(b + f * p), S.y + r * sin(b + f * p)]);
+        }
+      }
+      d.poly(pts, IN(d));
+      const hx = S.x + 74 * cos(s + PI * 0.92), hy = S.y + 74 * sin(s + PI * 0.92);
+      d.bar(S.x, S.y, hx, hy, { width: 12, ...IN(d) });
+      d.circle(hx, hy, 8, IN(d));
+      d.ground(S.x, S.y); d.pin(P.x, P.y, 4);
+    },
+    output: (t) => -(32 / 10) * SG.swing(t),
+  });
+
+  // ───────────────────────────── Sun and planet (Watt)
+  const SP = (() => {
+    const S = { x: 200, y: 198 }, z = 14, m = 4, a = 56, L = 100;
+    const at = (t) => {
+      const Pc = { x: S.x + a * cos(t), y: S.y + a * sin(t) };
+      const ys = Pc.y - sqrt(L * L - (Pc.x - S.x) ** 2);
+      const rod = atan2(Pc.y - ys, Pc.x - S.x);
+      return { Pc, ys, rod, sun: t - (rod - t - PI - PI / z) };
+    };
+    return { S, z, m, at };
+  })();
+  add({
+    id: 'sun-planet', title: 'Sun & planet', aka: ['Sun and planet gear', 'Watt\'s sun and planet', 'Epicyclic crank'],
+    motion: 'lin-rot', family: 'gears',
+    summary: 'A gear fixed to the end of a connecting rod orbits a central gear, turning it twice per stroke cycle — no crank needed.',
+    how: [
+      'The planet gear is rigidly attached to the rod, so it cannot spin on its own; it can only travel around the sun gear, held in mesh by a link. Walking around the sun without spinning forces the sun to turn — twice for each orbit when the gears are equal.',
+      'James Watt adopted it in 1781 to turn his engines\' beam motion into rotation while the simple crank was tied up by someone else\'s patent. The doubled speed was a bonus.',
+    ],
+    key: 'Equal gears: the sun makes two turns per orbit of the planet.',
+    uses: ['Watt rotative steam engines', 'Museum engines', 'Mechanical models'],
+    related: ['planetary', 'slider-crank', 'oscillating-engine'],
+    outLabel: 'Sun angle',
+    draw(d, t) {
+      const { S, z, m, at } = SP, { Pc, ys, rod, sun } = at(t);
+      d.vhatch(184, 20, 150, -1); d.vhatch(216, 20, 150, 1);
+      d.gear(S.x, S.y, z, m, sun, OUT(d));
+      d.bar(S.x, S.y, Pc.x, Pc.y, { width: 8 });
+      d.gear(Pc.x, Pc.y, z, m, rod, IN(d));
+      d.bar(S.x, ys, Pc.x, Pc.y, { width: 10, ...IN(d) });
+      d.box(S.x, ys, 30, 24, 0, IN(d));
+      d.pin(S.x, S.y, 4); d.pin(Pc.x, Pc.y); d.pin(S.x, ys);
+    },
+    output: (t) => SP.at(t).sun,
+  });
+
+  // ───────────────────────────── Elliptical gears
+  const EL = (() => {
+    const a = 70, e = 0.5, b = a * sqrt(1 - e * e), k = a * (1 - e * e);
+    const F1 = { x: 130, y: 150 }, F2 = { x: 270, y: 150 };
+    const r = (al) => k / (1 + e * cos(al));
+    const at = (t) => {
+      const al = mod(-t + PI, TAU) - PI;
+      const cb = Math.max(-1, Math.min(1, (k / (2 * a - r(al)) - 1) / e));
+      return { p1: t, p2: PI - (al >= 0 ? Math.acos(cb) : -Math.acos(cb)) };
+    };
+    return { a, e, b, F1, F2, at };
+  })();
+  add({
+    id: 'elliptical-gears', title: 'Elliptical gears', aka: ['Elliptic gears', 'Non-circular gears', 'Variable-speed gears'],
+    motion: 'rot-rot', family: 'gears',
+    summary: 'Two identical ellipses, each pivoted at a focus, roll together so a steady input gives a speeding-up, slowing-down output.',
+    how: [
+      'Pivoting each ellipse at a focus makes their radii at the contact point always add up to the same distance, so they roll against each other without gaps. (Real versions carry teeth; here the pitch curves are drawn.)',
+      'When the driver\'s long side meets the driven gear\'s short side, the output races; half a turn later it crawls. Over one revolution they even out. The graph bends instead of running straight.',
+    ],
+    key: 'Equal ellipses on their foci roll perfectly; the speed ratio varies through each turn.',
+    uses: ['Quick-return presses', 'Flow meters', 'Printing presses', 'Bicycle chainrings (oval)'],
+    related: ['spur-gears', 'quick-return'],
+    outLabel: 'Driven angle',
+    draw(d, t) {
+      const { a, e, b, F1, F2, at } = EL, { p1, p2 } = at(t);
+      const ell = (F, ps, o) => {
+        const cx = F.x - a * e * cos(ps), cy = F.y - a * e * sin(ps);
+        d.ctx.beginPath(); d.ctx.ellipse(cx, cy, a, b, ps, 0, TAU); d.paint(o);
+        d.line(cx - a * cos(ps), cy - a * sin(ps), cx + a * cos(ps), cy + a * sin(ps), { color: o.stroke, w: 1, dash: [3, 4] });
+        d.circle(F.x + a * (1 - e) * 0.6 * cos(ps), F.y + a * (1 - e) * 0.6 * sin(ps), 3, { fill: o.stroke, stroke: null });
+        d.pin(F.x, F.y, 4);
+      };
+      ell(F2, p2, OUT(d));
+      ell(F1, p1, IN(d));
+    },
+    output: (t) => mod(-EL.at(t).p2, TAU),
+  });
+
+  // ───────────────────────────── Reuleaux triangle cam
+  const RX = (() => {
+    const P = { x: 200, y: 150 }, w = 88;
+    const shape = (t) => {
+      const V = [P, { x: P.x + w * cos(t), y: P.y + w * sin(t) }, { x: P.x + w * cos(t + PI / 3), y: P.y + w * sin(t + PI / 3) }];
+      const pts = [];
+      for (let i = 0; i < 3; i++) {
+        const c = V[i], s = V[(i + 1) % 3], a0 = atan2(s.y - c.y, s.x - c.x);
+        for (let j = 0; j < 24; j++) { const a = a0 + (j / 24) * (PI / 3); pts.push([c.x + w * cos(a), c.y + w * sin(a)]); }
+      }
+      return pts;
+    };
+    const top = (t) => Math.min(...shape(t).map((q) => q[1]));
+    return { P, w, shape, top };
+  })();
+  add({
+    id: 'reuleaux-cam', title: 'Triangular cam', aka: ['Reuleaux triangle cam', 'Constant-width cam', 'Yoke cam'],
+    motion: 'rot-lin', family: 'cams',
+    summary: 'A curved triangle of constant width, turning inside a square yoke, pushes it up and down with pauses at each end.',
+    how: [
+      'A Reuleaux triangle is as wide in every direction as it is in any other, so it always touches both the top and bottom of a yoke exactly its width apart — no spring needed to keep contact.',
+      'Pivoted at one corner, it lifts the yoke, holds it still while a curved side slides along, lowers it, and holds again. Those built-in dwells made it useful for early steam-engine valves, which needed to stay open or shut for part of each stroke.',
+    ],
+    key: 'Constant width means positive drive both ways, with dwells built in.',
+    uses: ['Early steam valve gear', 'Film projector claws', 'Square-hole drills', 'Rotary engines'],
+    related: ['cam', 'heart-cam', 'scotch-yoke'],
+    outLabel: 'Yoke height',
+    draw(d, t) {
+      const { P, w, shape, top } = RX, y0 = top(t);
+      d.vhatch(94, 20, 260, -1); d.vhatch(306, 20, 260, 1);
+      d.layer((L) => {
+        L.box(200, y0 + w / 2, 212, w + 16, 0, OUT(L));
+        L.cut(() => L.box(200, y0 + w / 2, 196, w, 0, { fill: '#000', stroke: null }));
+        L.box(200, y0 + w / 2, 196, w, 0, { fill: null, stroke: L.C.output });
+      });
+      d.poly(shape(t), IN(d));
+      d.pin(P.x, P.y, 4.5);
+    },
+    output: (t) => -RX.top(t),
+  });
+
+  // ───────────────────────────── Stamp mill (wiper cam)
+  const ST = (() => {
+    const C = { x: 140, y: 205 }, dx = 62, L = 78, hw = 7, lim = Math.acos(dx / L);
+    const at = (t) => {
+      let y = C.y - hw;
+      for (const k of [0, 1]) {
+        const f = mod(-t + k * PI + PI, TAU) - PI;
+        if (f > -lim && f <= 0) y = Math.min(y, C.y + dx * Math.tan(f) - hw / cos(f));
+      }
+      return y;
+    };
+    return { C, dx, L, at };
+  })();
+  add({
+    id: 'stamp-mill', title: 'Wiper cam & stamp', aka: ['Stamp mill', 'Tappet and wiper', 'Trip hammer'],
+    motion: 'rot-lin', family: 'cams',
+    summary: 'Arms on a turning shaft catch a collar, lift a heavy stamp, then let it drop under its own weight.',
+    how: [
+      'Each wiper arm slides under the tappet collar and raises the stamp as the shaft turns. When the arm\'s tip slips past, nothing holds the stamp and it falls.',
+      'This turns steady rotation into a slow lift and a sudden blow — the jagged graph says it all. Water-wheel shafts drove rows of these to crush ore, forge iron and pound cloth for centuries.',
+    ],
+    key: 'Slow lift, free fall: rotation becomes repeated impact.',
+    uses: ['Ore stamp mills', 'Trip hammers', 'Fulling mills', 'Rice pounders'],
+    related: ['cam', 'heart-cam', 'ratchet'],
+    outLabel: 'Stamp height',
+    speed: 0.8,
+    draw(d, t) {
+      const { C, L, at } = ST, y = at(t), rx = 226;
+      d.box(226, 281, 90, 12, 0, GND(d));
+      d.vhatch(214, 30, 70, -1); d.vhatch(238, 30, 70, 1);
+      d.box(rx, y - 6, 52, 12, 0, OUT(d));
+      d.box(rx, y - 30, 12, 190, 0, OUT(d));
+      d.box(rx, y + 64, 32, 26, 0, OUT(d));
+      for (const k of [0, 1]) { const f = -t + k * PI; d.bar(C.x, C.y, C.x + L * cos(f), C.y + L * sin(f), { width: 14, ...IN(d) }); }
+      d.circle(C.x, C.y, 16, IN(d));
+      d.pin(C.x, C.y, 4);
+    },
+    output: (t) => -ST.at(t),
+  });
+
+  // ───────────────────────────── Differential windlass
+  const DW = { A: { x: 200, y: 74 }, R1: 54, R2: 34, th: (t) => 3 * (1 - cos(t)) };
+  add({
+    id: 'differential-windlass', title: 'Differential windlass', aka: ['Chinese windlass', 'Differential hoist', 'Two-drum winch'],
+    motion: 'rot-lin', family: 'belts',
+    summary: 'One rope winds onto a big drum while unwinding from a small one; the load rises by only half the difference.',
+    how: [
+      'Both drums share one axle. Turning the crank reels rope in on the large drum and pays it out from the small drum, so the loop holding the pulley shortens only by the difference in their circumferences.',
+      'The load therefore rises very slowly for a lot of cranking — which means an enormous mechanical advantage from a compact winch. Make the drums nearly equal and the advantage grows without limit.',
+    ],
+    key: 'Rise per turn = π × (big radius − small radius).',
+    uses: ['Hand hoists', 'Chain blocks', 'Well windlasses', 'Precision lifting'],
+    related: ['block-tackle', 'worm-gear', 'lead-screw'],
+    outLabel: 'Load height',
+    draw(d, t) {
+      const { A, R1, R2, th } = DW, a = th(t), r = (R1 + R2) / 2, px = A.x + (R2 - R1) / 2, py = 205 - ((R1 - R2) * a) / 2;
+      d.hatch(130, 20, 140, -1);
+      d.line(A.x, 20, A.x, A.y, { color: d.C.ground, w: 3 });
+      d.line(px, py, px, py + 34, { color: d.C.ink, w: 2 });
+      d.box(px, py + 52, 52, 34, 0, OUT(d));
+      pulley(d, { x: px, y: py }, r, a, GND(d));
+      const ctx = d.ctx;
+      ctx.beginPath();
+      ctx.moveTo(A.x - R1, A.y); ctx.lineTo(px - r, py);
+      ctx.arc(px, py, r, PI, 0, true);
+      ctx.lineTo(A.x + R2, A.y);
+      d.paint({ stroke: d.C.ink, w: 2.5 });
+      d.circle(A.x, A.y, R1, IN(d));
+      for (let i = 0; i < 6; i++) { const s = a + (i * PI) / 3; d.line(A.x + R2 * cos(s), A.y + R2 * sin(s), A.x + (R1 - 4) * cos(s), A.y + (R1 - 4) * sin(s), { color: d.C.input, w: 1 }); }
+      d.circle(A.x, A.y, R2, IN(d));
+      const hx = A.x + 74 * cos(a + 2.4), hy = A.y + 74 * sin(a + 2.4);
+      d.bar(A.x, A.y, hx, hy, { width: 9, ...IN(d) });
+      d.circle(hx, hy, 6, { fill: d.C.input, stroke: d.C.input });
+      d.pin(A.x, A.y, 4); d.pin(px, py);
+    },
+    output: (t) => ((DW.R1 - DW.R2) * DW.th(t)) / 2,
   });
 
   window.Movements = { list: M, byId: Object.fromEntries(M.map((m) => [m.id, m])), MOTION, FAMILY };

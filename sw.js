@@ -1,6 +1,6 @@
 // Service worker: makes the site installable and fully usable offline.
 // Bump VERSION when shipping changes to the app shell.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL = `shell-${VERSION}`;
 const FONTS = 'fonts-v1';
 const FILES = [
